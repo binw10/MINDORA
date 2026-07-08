@@ -1,0 +1,33 @@
+# Draft only. This file is intentionally stored under docs/ and is not active.
+# To enable it later, review the strategy, then move it to:
+# .github/workflows/deploy.yml
+
+name: Deploy MINDORA Website
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy on EC2 over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /home/admin/mindora-website
+            git fetch origin main
+            git reset --hard origin/main
+            npm ci
+            npm run build
+            sudo systemctl restart mindora-website
+            sudo systemctl status mindora-website --no-pager
