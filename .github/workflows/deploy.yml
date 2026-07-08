@@ -1,0 +1,176 @@
+name: Deploy MINDORA Website
+
+'on':
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy. Leave empty to deploy the selected workflow branch."
+        required: false
+        type: string
+      skip_build_cache:
+        description: "Run a clean dependency install even if package-lock.json did not change."
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy to EC2 production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Check deployment switch
+        run: |
+          if [ "${{ secrets.DEPLOY_ENABLED }}" != "true" ]; then
+            echo "Deployment is disabled. Set GitHub Secret DEPLOY_ENABLED=true after approval."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Resolve commit to deploy
+        id: revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          DEPLOY_SHA: ${{ steps.revision.outputs.sha }}
+          DEPLOY_SHORT_SHA: ${{ steps.revision.outputs.short_sha }}
+          DEPLOY_BRANCH: main
+          APP_DIR: ${{ secrets.APP_DIR || '/home/admin/mindora-website' }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mindora-website' }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL || 'http://127.0.0.1/' }}
+          SKIP_BUILD_CACHE: ${{ inputs.skip_build_cache }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_PORT || 22 }}
+          envs: DEPLOY_SHA,DEPLOY_SHORT_SHA,DEPLOY_BRANCH,APP_DIR,SERVICE_NAME,HEALTHCHECK_URL,SKIP_BUILD_CACHE
+          script_stop: true
+          command_timeout: 25m
+          script: |
+            set -Eeuo pipefail
+
+            log() {
+              printf '[deploy] %s\n' "$*"
+            }
+
+            require_command() {
+              command -v "$1" >/dev/null 2>&1 || {
+                log "Missing required command: $1"
+                exit 1
+              }
+            }
+
+            verify_http() {
+              local url="$1"
+              local status
+              status="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)"
+              if [ "$status" != "200" ]; then
+                log "Healthcheck failed for $url with HTTP status: ${status:-curl_error}"
+                return 1
+              fi
+              log "Healthcheck passed for $url"
+            }
+
+            rollback() {
+              local exit_code="$?"
+              trap - ERR
+
+              log "Deployment failed. Starting rollback to ${PREVIOUS_SHA:-unknown}."
+              if [ -n "${PREVIOUS_SHA:-}" ]; then
+                cd "$APP_DIR"
+                git reset --hard "$PREVIOUS_SHA"
+
+                if [ -f package-lock.json ]; then
+                  npm ci
+                else
+                  npm install
+                fi
+
+                npm run build
+                sudo systemctl restart "$SERVICE_NAME"
+                sleep 3
+                sudo systemctl is-active --quiet "$SERVICE_NAME"
+                verify_http "$HEALTHCHECK_URL"
+                log "Rollback completed to $PREVIOUS_SHA."
+              else
+                log "Rollback skipped because previous revision was not captured."
+              fi
+
+              exit "$exit_code"
+            }
+
+            trap rollback ERR
+
+            require_command git
+            require_command npm
+            require_command curl
+            require_command sudo
+
+            cd "$APP_DIR"
+
+            if [ ! -d .git ]; then
+              log "Application directory is not a Git repository: $APP_DIR"
+              exit 1
+            fi
+
+            PREVIOUS_SHA="$(git rev-parse HEAD)"
+            PREVIOUS_LOCK_HASH=""
+            if [ -f package-lock.json ]; then
+              PREVIOUS_LOCK_HASH="$(sha256sum package-lock.json | awk '{print $1}')"
+            fi
+
+            log "Current revision: $PREVIOUS_SHA"
+            log "Target revision: $DEPLOY_SHA"
+
+            git fetch --prune origin "$DEPLOY_BRANCH"
+            if ! git cat-file -e "$DEPLOY_SHA^{commit}"; then
+              log "Target commit is not available on the server: $DEPLOY_SHA"
+              exit 1
+            fi
+
+            git reset --hard "$DEPLOY_SHA"
+
+            CURRENT_LOCK_HASH=""
+            if [ -f package-lock.json ]; then
+              CURRENT_LOCK_HASH="$(sha256sum package-lock.json | awk '{print $1}')"
+            fi
+
+            if [ ! -d node_modules ] || [ "$SKIP_BUILD_CACHE" = "true" ] || [ "$PREVIOUS_LOCK_HASH" != "$CURRENT_LOCK_HASH" ]; then
+              log "Installing dependencies with npm ci."
+              npm ci
+            else
+              log "package-lock.json unchanged and node_modules exists. Skipping dependency install."
+            fi
+
+            log "Building Next.js application."
+            npm run build
+
+            log "Restarting systemd service: $SERVICE_NAME"
+            sudo systemctl restart "$SERVICE_NAME"
+            sleep 3
+            sudo systemctl is-active --quiet "$SERVICE_NAME"
+
+            verify_http "$HEALTHCHECK_URL"
+
+            trap - ERR
+            log "Deployment completed successfully: $DEPLOY_SHORT_SHA"
