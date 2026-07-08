@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #101828;
+  --color-background: #f5faff;
+  --color-surface: #ffffff;
+  --color-muted: #eaf4ff;
+  --color-accent: #1f6bff;
+  --color-focus: #1f6bff;
+  --color-border: rgba(31, 107, 255, 0.14);
+
+  --color-system-page: #f5faff;
+  --color-system-surface: rgba(255, 255, 255, 0.86);
+  --color-system-muted: #eaf4ff;
+  --color-system-inverse: #030712;
+  --color-system-primary: #1f6bff;
+  --color-system-primary-hover: #0b58e8;
+  --color-system-accent-blue: #1f6bff;
+  --color-system-accent-cyan: #38bdf8;
+  --color-system-accent-gold: #7c4dff;
+  --color-system-text-primary: #101828;
+  --color-system-text-secondary: #475467;
+  --color-system-text-muted: #667085;
+  --color-system-text-inverse: #f8fbff;
+  --color-system-border-subtle: rgba(31, 107, 255, 0.14);
+  --color-system-border-strong: rgba(31, 107, 255, 0.28);
+  --shadow-system-card: 0 18px 55px rgba(31, 107, 255, 0.11);
+  --shadow-system-panel: 0 32px 90px rgba(31, 107, 255, 0.18);
+}
+
+:root {
+  --font-sans: "Plus Jakarta Sans", "Noto Sans SC", "Microsoft YaHei UI", "Segoe UI",
+    -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  text-rendering: optimizeLegibility;
+  background:
+    radial-gradient(circle at 15% 8%, rgba(56, 189, 248, 0.2), transparent 28rem),
+    radial-gradient(circle at 82% 0%, rgba(124, 77, 255, 0.18), transparent 30rem),
+    var(--color-background);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+}
+
+:focus-visible {
+  outline-color: var(--color-focus);
+}
+
+[data-system-diagram] [data-system-card] {
+  animation: mindora-system-card-fallback 4.8s ease-in-out infinite;
+}
+
+[data-system-diagram] [data-system-card]:nth-of-type(2n) {
+  animation-delay: -1.2s;
+}
+
+[data-system-diagram] [data-system-card]:nth-of-type(3n) {
+  animation-delay: -2.1s;
+}
+
+[data-system-diagram][data-system-motion-state="running"] [data-system-card] {
+  animation: none;
+}
+
+@keyframes mindora-system-card-fallback {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+
+  33% {
+    transform: translate3d(18px, -22px, 0) rotate(2deg);
+  }
+
+  66% {
+    transform: translate3d(-16px, 18px, 0) rotate(-1.6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  [data-system-diagram] [data-system-card] {
+    animation: none;
+  }
+}
