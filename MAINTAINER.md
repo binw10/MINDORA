@@ -2,7 +2,7 @@
 
 ## Source of Truth
 
-GitHub is the single source of truth for the MINDORA website codebase.
+GitHub is the single source of truth for the MINDORA website.
 
 Repository:
 
@@ -10,94 +10,91 @@ Repository:
 https://github.com/binw10/MINDORA
 ```
 
-Future code changes should always be committed to GitHub first. The EC2 server should only pull reviewed code from GitHub and run the production build from that checked-out version.
+Future code changes should be committed to GitHub first. The EC2 server should only pull reviewed code from GitHub and run the production build from that checked-out version.
 
-## Production Server
-
-Current production directory:
+## Production Server Model
 
 ```text
-/home/admin/mindora-website
+GitHub
+  -> GitHub Actions over SSH
+  -> AWS EC2
+  -> /home/admin/mindora-website
+  -> systemd service: mindora-website
+  -> Apache reverse proxy
+  -> Next.js on localhost:3000
 ```
 
-Current runtime process manager:
+## Maintainer Responsibilities
 
-```text
-systemd service: mindora-website
-```
+- Keep `main` deployable.
+- Keep `.env.example` and `docs/environment.md` current.
+- Keep deployment and recovery docs current after infrastructure changes.
+- Rotate or remove secrets immediately if they are exposed.
+- Do not edit production code directly on EC2 except emergency hotfixes.
 
-Current reverse proxy:
-
-```text
-Apache reverse proxy -> http://127.0.0.1:3000
-```
-
-## Recommended Development Workflow
-
-1. Make code changes locally or in a development environment.
-2. Run checks before publishing:
+## Standard Change Workflow
 
 ```bash
-npm run lint
-npm run build
-```
-
-3. Commit changes to Git.
-4. Push changes to GitHub.
-5. Deploy to EC2 by pulling from GitHub on the server.
-6. Install dependencies only from `package-lock.json`:
-
-```bash
+git checkout main
+git pull origin main
 npm ci
+npm run check
+git checkout -b <short-change-name>
+# make changes
+npm run check
+git add <files>
+git commit -m "Describe the change"
+git push origin <branch>
 ```
 
-7. Build the production application:
+Deploy only after review. See [`docs/release-guide.md`](docs/release-guide.md).
+
+## Emergency Hotfix Workflow
+
+Use only when production is broken and normal GitHub flow is too slow.
+
+1. SSH into the server.
+2. Record current state:
+
+```bash
+cd /home/admin/mindora-website
+git status -sb
+git rev-parse HEAD
+```
+
+3. Make the smallest possible fix.
+4. Run validation:
 
 ```bash
 npm run build
+npm run healthcheck
 ```
 
-8. Restart the systemd service:
+5. Commit and push the hotfix back to GitHub immediately.
+6. Open a follow-up maintenance issue or note describing what happened.
+
+## Operational Commands
 
 ```bash
-sudo systemctl restart mindora-website
+npm run healthcheck
+npm run audit:production
+npm run backup:production
 ```
 
-9. Verify the public website and key routes.
+See [`docs/operations.md`](docs/operations.md) for details.
 
-## Server Change Policy
+## Secrets
 
-Avoid making manual code changes directly on the EC2 server. Direct server edits make GitHub drift from production and make future deployments risky.
+Do not commit secrets. Production Supabase credentials are provided through server-side environment configuration. GitHub Actions deployment credentials are stored in GitHub Secrets.
 
-Manual server edits are only acceptable for emergency hotfixes. If an emergency hotfix is made directly on the server, commit and push that change back to GitHub as soon as possible.
+Safe to commit:
 
-## Secrets and Environment Variables
+- `.env.example`
+- documentation naming required variables
 
-Do not commit secrets to GitHub.
+Never commit:
 
-Production secrets are managed outside the repository through systemd environment configuration. The Supabase service role key must remain outside Git and should never be placed in `.env`, source files, documentation, or commits.
-
-Safe files to commit include `.env.example` because it documents required variables without containing secret values.
-
-## Deployment Notes
-
-The application uses:
-
-```bash
-npm run build
-npm run start
-```
-
-The production service runs from:
-
-```text
-/home/admin/mindora-website
-```
-
-The expected runtime port is:
-
-```text
-3000
-```
-
-Apache handles public HTTP traffic and proxies requests to the local Next.js process.
+- `.env` or `.env.*`
+- SSH private keys
+- Supabase service role keys
+- AWS keys
