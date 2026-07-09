@@ -235,4 +235,8 @@ Use either option:
 1. Set `DEPLOY_ENABLED` to `false` or remove the Secret.
 2. Remove or rename `.github/workflows/deploy.yml` in a reviewed commit.
 
-Because the workflow is manual-only, disabling the safety switch is usually enough. Keep `DEPLOY_ENABLED=false` until a maintainer explicitly approves the first deployment run.
+Because the workflow is manual-only, disabling the safety switch is usually enough. Keep `DEPLOY_ENABLED=false` whenever production deployment is not actively approved.
+
+## First Deployment Validation
+
+The first production deployment should use a documentation-only commit to verify the full GitHub Actions, SSH, build, restart, health check, and rollback safety path before shipping application changes.
