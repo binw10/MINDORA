@@ -240,3 +240,7 @@ Because the workflow is manual-only, disabling the safety switch is usually enou
 ## First Deployment Validation
 
 The first production deployment should use a documentation-only commit to verify the full GitHub Actions, SSH, build, restart, health check, and rollback safety path before shipping application changes.
+
+## Warning Cleanup Validation
+
+A follow-up documentation-only deployment validates that the deployment workflow runs without GitHub Actions runtime or unsupported input warnings after action version updates.
