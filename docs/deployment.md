@@ -244,3 +244,7 @@ The first production deployment should use a documentation-only commit to verify
 ## Warning Cleanup Validation
 
 A follow-up documentation-only deployment validates that the deployment workflow runs without GitHub Actions runtime or unsupported input warnings after action version updates.
+
+## Warning-Free Deployment Validation
+
+A second documentation-only deployment validates the workflow after approving dependency install scripts and upgrading action versions.
