@@ -248,3 +248,7 @@ A follow-up documentation-only deployment validates that the deployment workflow
 ## Warning-Free Deployment Validation
 
 A second documentation-only deployment validates the workflow after approving dependency install scripts and upgrading action versions.
+
+## Clean Log Deployment Validation
+
+A final documentation-only deployment validates the workflow after action runtime updates, SSH action input cleanup, dependency install-script approval, and Git checkout hint suppression.
