@@ -43,13 +43,13 @@ jobs:
           fi
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.0
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 0
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -69,7 +69,7 @@ jobs:
           echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.2.2
+        uses: appleboy/ssh-action@v1.2.5
         env:
           DEPLOY_SHA: ${{ steps.revision.outputs.sha }}
           DEPLOY_SHORT_SHA: ${{ steps.revision.outputs.short_sha }}
@@ -86,7 +86,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
           envs: DEPLOY_SHA,DEPLOY_SHORT_SHA,DEPLOY_BRANCH,APP_DIR,BACKUP_DIR,SERVICE_NAME,HEALTHCHECK_URL,CLEAN_INSTALL,CREATE_BACKUP
-          script_stop: true
           command_timeout: 28m
           script: |
             set -Eeuo pipefail
