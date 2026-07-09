@@ -7,14 +7,19 @@ name: Deploy MINDORA Website
         description: "Git ref to deploy. Leave empty to deploy the selected workflow branch."
         required: false
         type: string
-      skip_build_cache:
-        description: "Run a clean dependency install even if package-lock.json did not change."
+      clean_install:
+        description: "Force npm ci even when package-lock.json did not change."
         required: false
         default: false
         type: boolean
+      create_backup:
+        description: "Create a source backup on the server before deploying."
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
-  group: production-deploy
+  group: mindora-production-deploy
   cancel-in-progress: false
 
 permissions:
@@ -24,14 +29,16 @@ jobs:
   deploy:
     name: Deploy to EC2 production
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     environment: production
 
     steps:
-      - name: Check deployment switch
+      - name: Check deployment safety switch
+        shell: bash
         run: |
+          set -euo pipefail
           if [ "${{ secrets.DEPLOY_ENABLED }}" != "true" ]; then
-            echo "Deployment is disabled. Set GitHub Secret DEPLOY_ENABLED=true after approval."
+            echo "Deployment is disabled. Set GitHub Secret DEPLOY_ENABLED=true only after explicit approval."
             exit 1
           fi
 
@@ -39,8 +46,21 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
 
-      - name: Resolve commit to deploy
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies for preflight
+        run: npm ci
+
+      - name: Run preflight checks
+        run: npm run check
+
+      - name: Resolve deployment revision
         id: revision
         shell: bash
         run: |
@@ -55,19 +75,28 @@ jobs:
           DEPLOY_SHORT_SHA: ${{ steps.revision.outputs.short_sha }}
           DEPLOY_BRANCH: main
           APP_DIR: ${{ secrets.APP_DIR || '/home/admin/mindora-website' }}
+          BACKUP_DIR: ${{ secrets.BACKUP_DIR || '/home/admin/backups' }}
           SERVICE_NAME: ${{ secrets.SERVICE_NAME || 'mindora-website' }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL || 'http://127.0.0.1/' }}
-          SKIP_BUILD_CACHE: ${{ inputs.skip_build_cache }}
+          CLEAN_INSTALL: ${{ inputs.clean_install }}
+          CREATE_BACKUP: ${{ inputs.create_backup }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT || 22 }}
-          envs: DEPLOY_SHA,DEPLOY_SHORT_SHA,DEPLOY_BRANCH,APP_DIR,SERVICE_NAME,HEALTHCHECK_URL,SKIP_BUILD_CACHE
+          envs: DEPLOY_SHA,DEPLOY_SHORT_SHA,DEPLOY_BRANCH,APP_DIR,BACKUP_DIR,SERVICE_NAME,HEALTHCHECK_URL,CLEAN_INSTALL,CREATE_BACKUP
           script_stop: true
-          command_timeout: 25m
+          command_timeout: 28m
           script: |
             set -Eeuo pipefail
+
+            LOCK_FILE="/tmp/mindora-production-deploy.lock"
+            exec 9>"$LOCK_FILE"
+            if ! flock -n 9; then
+              echo "[deploy] Another deployment is already running."
+              exit 1
+            fi
 
             log() {
               printf '[deploy] %s\n' "$*"
@@ -82,20 +111,24 @@ jobs:
 
             verify_http() {
               local url="$1"
-              local status
-              status="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)"
-              if [ "$status" != "200" ]; then
-                log "Healthcheck failed for $url with HTTP status: ${status:-curl_error}"
-                return 1
-              fi
-              log "Healthcheck passed for $url"
+              local attempt status
+              for attempt in 1 2 3 4 5; do
+                status="$(curl -fsS -o /dev/null -w '%{http_code}' --max-time 15 "$url" || true)"
+                if [ "$status" = "200" ]; then
+                  log "Healthcheck passed for $url on attempt $attempt."
+                  return 0
+                fi
+                log "Healthcheck attempt $attempt failed for $url with status ${status:-curl_error}."
+                sleep 3
+              done
+              return 1
             }
 
             rollback() {
               local exit_code="$?"
               trap - ERR
 
-              log "Deployment failed. Starting rollback to ${PREVIOUS_SHA:-unknown}."
+              log "Deployment failed. Attempting rollback to ${PREVIOUS_SHA:-unknown}."
               if [ -n "${PREVIOUS_SHA:-}" ]; then
                 cd "$APP_DIR"
                 git reset --hard "$PREVIOUS_SHA"
@@ -125,11 +158,18 @@ jobs:
             require_command npm
             require_command curl
             require_command sudo
+            require_command flock
 
             cd "$APP_DIR"
 
             if [ ! -d .git ]; then
               log "Application directory is not a Git repository: $APP_DIR"
+              exit 1
+            fi
+
+            if [ -n "$(git status --porcelain)" ]; then
+              log "Server working tree is dirty. Refusing to deploy."
+              git status --short
               exit 1
             fi
 
@@ -141,6 +181,13 @@ jobs:
 
             log "Current revision: $PREVIOUS_SHA"
             log "Target revision: $DEPLOY_SHA"
+
+            if [ "$CREATE_BACKUP" = "true" ] && [ -x scripts/backup-production.sh ]; then
+              log "Creating pre-deployment source backup."
+              APP_DIR="$APP_DIR" BACKUP_DIR="$BACKUP_DIR" bash scripts/backup-production.sh
+            else
+              log "Skipping pre-deployment source backup."
+            fi
 
             git fetch --prune origin "$DEPLOY_BRANCH"
             if ! git cat-file -e "$DEPLOY_SHA^{commit}"; then
@@ -155,7 +202,7 @@ jobs:
               CURRENT_LOCK_HASH="$(sha256sum package-lock.json | awk '{print $1}')"
             fi
 
-            if [ ! -d node_modules ] || [ "$SKIP_BUILD_CACHE" = "true" ] || [ "$PREVIOUS_LOCK_HASH" != "$CURRENT_LOCK_HASH" ]; then
+            if [ ! -d node_modules ] || [ "$CLEAN_INSTALL" = "true" ] || [ "$PREVIOUS_LOCK_HASH" != "$CURRENT_LOCK_HASH" ]; then
               log "Installing dependencies with npm ci."
               npm ci
             else
