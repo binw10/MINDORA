@@ -30,6 +30,22 @@ Production runtime:
 - Reverse proxy: Apache
 - Health check default: `http://127.0.0.1/`
 
+## Domain and SSL Reverse Proxy
+
+The reviewed Apache SSL vhost template for `midra.ai` lives at:
+
+```text
+deploy/apache/midra.ai.conf
+```
+
+Certificate installation and production activation steps are documented in:
+
+```text
+docs/apache-ssl-midra.md
+```
+
+The certificate and private key must be installed on the server outside Git. Do not commit certificate material or private keys.
+
 ## Deployment Flow
 
 The workflow is manual-only. It does not deploy on push.

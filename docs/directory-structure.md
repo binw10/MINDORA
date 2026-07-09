@@ -4,6 +4,9 @@
 .github/workflows/
   deploy.yml                         Guarded manual production deployment workflow.
 
+deploy/apache/
+  midra.ai.conf                      Reviewed Apache SSL reverse proxy vhost template.
+
 app/
   layout.tsx                         Root layout, provider wiring, header/footer frame.
   page.tsx                           Homepage entry.
